@@ -16,7 +16,6 @@ export async function PATCH(
     if (contentType.includes('multipart/form-data')) {
       // Handle team update with images
       const formData = await req.formData();
-      const teamName = formData.get('teamName') as string;
       const slotNumberStr = formData.get('slotNumber') as string;
       
       const team = await prisma.team.findUnique({
@@ -41,31 +40,9 @@ export async function PATCH(
         }
       }
 
-      // Handle team image update
-      let teamImageUrl = team.teamImage;
-      const teamImageFile = formData.get('teamImage') as File | null;
-      if (teamImageFile && teamImageFile.size > 0) {
-        const buffer = Buffer.from(await teamImageFile.arrayBuffer());
-        const ext = teamImageFile.name.split('.').pop() || 'jpg';
-        const key = `teams/${team.slotNumber}-${Date.now()}.${ext}`;
-        teamImageUrl = await uploadToS3(buffer, key, teamImageFile.type);
-        
-        // Delete old team image if exists
-        if (team.teamImage) {
-          const oldKey = extractS3Key(team.teamImage);
-          if (oldKey) await deleteFromS3(oldKey);
-        }
-      }
 
-      // Update team
-      const updatedTeam = await prisma.team.update({
-        where: { id: teamId },
-        data: {
-          teamName: teamName || team.teamName,
-          teamImage: teamImageUrl,
-          ...(slotNumberStr && { slotNumber: parseInt(slotNumberStr) }),
-        },
-      });
+
+
 
       // Handle player updates
       for (let i = 0; i < 4; i++) {
