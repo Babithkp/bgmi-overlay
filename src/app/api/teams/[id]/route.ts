@@ -155,8 +155,7 @@ export async function PATCH(
 
       return NextResponse.json(team);
     }
-  } catch (error: any) {
-    console.error('Error updating team:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 }

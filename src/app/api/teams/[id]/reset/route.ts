@@ -9,7 +9,7 @@ export async function POST(
   try {
     const resolvedParams = await Promise.resolve(params);
     const id = typeof resolvedParams === 'object' && 'id' in resolvedParams ? resolvedParams.id : String(resolvedParams);
-    
+
     if (!id) {
       return NextResponse.json({ error: 'Team ID is required' }, { status: 400 });
     }
@@ -53,15 +53,12 @@ export async function POST(
     await prisma.team.delete({ where: { id } });
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('Error resetting team:', error);
-    const errorMessage = error?.message || 'Internal server error';
-    const errorStack = error?.stack || '';
-    console.error('Error details:', { errorMessage, errorStack });
+  } catch {
+
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to reset team',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+
       },
       { status: 500 }
     );

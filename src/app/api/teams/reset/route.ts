@@ -39,8 +39,7 @@ export async function POST() {
     await prisma.team.deleteMany({});
 
     return NextResponse.json({ success: true, message: 'All teams reset successfully' });
-  } catch (error: any) {
-    console.error('Error resetting all teams:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Error resetting all teams" }, { status: 500 });
   }
 }
