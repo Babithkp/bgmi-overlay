@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev\" \"node ws-server.js\"",
+    "dev": "next dev",
     "build": "next build",
-    "start": "concurrently \"next start\" \"node ws-server.js\"",
-    "lint": "eslint"
+    "start": "next start",
+    "lint": "next lint"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.971.0",
