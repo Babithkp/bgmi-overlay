@@ -1,112 +1,158 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { uploadToS3, deleteFromS3, extractS3Key } from '@/lib/s3';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { uploadToS3, deleteFromS3, extractS3Key } from "@/lib/s3";
 
-// GET all teams
+// 🔴 CRITICAL: Prisma + S3 MUST run in Node
+export const runtime = "nodejs";
+
+// ==============================
+// GET ALL TEAMS (DEBUG ENABLED)
+// ==============================
 export async function GET() {
   try {
     const teams = await prisma.team.findMany({
       include: { players: true },
-      orderBy: { slotNumber: 'asc' },
+      orderBy: { slotNumber: "asc" },
     });
+
     return NextResponse.json(teams);
-  } catch  {
-    return NextResponse.json({ error: 'Failed to fetch teams' }, { status: 500 });
+  } catch (err) {
+    console.error("API /teams GET ERROR:", err);
+    return NextResponse.json(
+      {
+        error: "Failed to fetch teams",
+        details: String(err),
+      },
+      { status: 500 }
+    );
   }
 }
 
-// POST - Create or update teams (bulk or single)
+// ==============================
+// POST CREATE / UPDATE TEAMS
+// ==============================
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
-    const teamsJson = formData.get('teams') as string;
-    
+    const teamsJson = formData.get("teams") as string;
+
     if (!teamsJson) {
-      return NextResponse.json({ error: 'No teams data provided' }, { status: 400 });
+      return NextResponse.json(
+        { error: "No teams data provided" },
+        { status: 400 }
+      );
     }
 
     const teamsData = JSON.parse(teamsJson);
-    const results = [];
 
     for (const teamData of teamsData) {
       const { slotNumber, teamName, players = [] } = teamData;
+      const slot = Number(slotNumber);
 
-      // Check if slot already exists (for update)
       const existingTeam = await prisma.team.findUnique({
-        where: { slotNumber: parseInt(slotNumber) },
+        where: { slotNumber: slot },
         include: { players: true },
       });
 
-      // Upload team image if provided
-      let teamImageUrl = existingTeam?.teamImage || null;
-      const teamImageFile = formData.get(`teamImage-${slotNumber}`) as File | null;
-      
+      // -------- TEAM IMAGE --------
+      let teamImageUrl = existingTeam?.teamImage ?? null;
+      const teamImageFile = formData.get(
+        `teamImage-${slot}`
+      ) as File | null;
+
       if (teamImageFile && teamImageFile.size > 0) {
-        const buffer = Buffer.from(await teamImageFile.arrayBuffer());
-        const ext = teamImageFile.name.split('.').pop() || 'jpg';
-        const key = `teams/${slotNumber}-${Date.now()}.${ext}`;
-        teamImageUrl = await uploadToS3(buffer, key, teamImageFile.type);
-        
-        // Delete old team image if exists
+        const buffer = Buffer.from(
+          await teamImageFile.arrayBuffer()
+        );
+        const ext =
+          teamImageFile.name.split(".").pop() || "jpg";
+        const key = `teams/${slot}-${Date.now()}.${ext}`;
+
+        teamImageUrl = await uploadToS3(
+          buffer,
+          key,
+          teamImageFile.type
+        );
+
         if (existingTeam?.teamImage) {
           const oldKey = extractS3Key(existingTeam.teamImage);
           if (oldKey) await deleteFromS3(oldKey);
         }
       }
 
-      // Create or update team
+      // -------- UPSERT TEAM --------
       const team = await prisma.team.upsert({
-        where: { slotNumber: parseInt(slotNumber) },
+        where: { slotNumber: slot },
         update: {
           teamName,
-          teamImage: teamImageUrl || undefined,
+          teamImage: teamImageUrl ?? undefined,
         },
         create: {
-          slotNumber: parseInt(slotNumber),
+          slotNumber: slot,
           teamName,
           teamImage: teamImageUrl,
         },
       });
 
-      // Delete existing players if updating
+      // -------- RESET PLAYERS --------
       if (existingTeam) {
-        await prisma.player.deleteMany({ where: { teamId: team.id } });
+        await prisma.player.deleteMany({
+          where: { teamId: team.id },
+        });
       }
 
-      // Upload and create players (always 4 players)
+      // -------- CREATE PLAYERS --------
       for (let i = 0; i < 4; i++) {
-        const player = players[i] || { playerName: '' };
-        let playerImageUrl = null;
+        const player = players[i] || { playerName: "" };
+        let playerImageUrl: string | null = null;
 
-        const playerImageFile = formData.get(`playerImage-${slotNumber}-${i}`) as File | null;
+        const playerImageFile = formData.get(
+          `playerImage-${slot}-${i}`
+        ) as File | null;
+
         if (playerImageFile && playerImageFile.size > 0) {
-          const buffer = Buffer.from(await playerImageFile.arrayBuffer());
-          const ext = playerImageFile.name.split('.').pop() || 'jpg';
-          const key = `players/${slotNumber}-${i}-${Date.now()}.${ext}`;
-          playerImageUrl = await uploadToS3(buffer, key, playerImageFile.type);
+          const buffer = Buffer.from(
+            await playerImageFile.arrayBuffer()
+          );
+          const ext =
+            playerImageFile.name.split(".").pop() || "jpg";
+          const key = `players/${slot}-${i}-${Date.now()}.${ext}`;
+
+          playerImageUrl = await uploadToS3(
+            buffer,
+            key,
+            playerImageFile.type
+          );
         }
 
         await prisma.player.create({
           data: {
             teamId: team.id,
-            playerName: player.playerName || '',
+            playerName: player.playerName || "",
             playerImage: playerImageUrl,
             position: i + 1,
           },
         });
       }
-
-      results.push(team);
     }
 
-    // Fetch updated teams with players
     const updatedTeams = await prisma.team.findMany({
       include: { players: true },
-      orderBy: { slotNumber: 'asc' },
+      orderBy: { slotNumber: "asc" },
     });
 
-    return NextResponse.json({ success: true, teams: updatedTeams });
-  } catch  {
-    return NextResponse.json({ error: "Failed try again" }, { status: 500 }); 
+    return NextResponse.json({
+      success: true,
+      teams: updatedTeams,
+    });
+  } catch (err) {
+    console.error("API /teams POST ERROR:", err);
+    return NextResponse.json(
+      {
+        error: "Failed try again",
+        details: String(err),
+      },
+      { status: 500 }
+    );
   }
 }

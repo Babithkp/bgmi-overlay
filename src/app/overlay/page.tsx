@@ -1,22 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import { useEffect, useState } from "react";
 
-interface Player {
-  id: string;
-  playerName: string;
-  playerImage: string | null;
-  position: number;
-}
-
-interface Team {
-  id: string;
-  teamName: string;
-  slotNumber: number;
-  teamImage: string | null;
-  players: Player[];
-}
 // =========================
 // SIMILARITY (NO NORMALIZATION)
 // =========================
@@ -36,14 +21,14 @@ function similarity(a: string, b: string): number {
 }
 
 export default function OverlayPage() {
-  const [dbTeams, setDbTeams] = useState<Team[]>([]);
+  const [dbTeams, setDbTeams] = useState<any[]>([]);
   const [ocrDebug, setOcrDebug] = useState<any>(null);
   const [matchDebug, setMatchDebug] = useState<any>(null);
 
   const [mounted, setMounted] = useState(false);
 
   // =========================
-  // MOUNT FLAG
+  // MOUNT FLAG (HYDRATION SAFE)
   // =========================
   useEffect(() => {
     setMounted(true);
@@ -57,11 +42,14 @@ export default function OverlayPage() {
       .then((res) => res.json())
       .then((data) => {
         setDbTeams(Array.isArray(data) ? data : []);
-      });
+      })
+      .catch(() =>
+        console.error("Failed to load admin teams")
+      );
   }, []);
 
   // =========================
-  // OCR STREAM
+  // OCR STREAM (POLLING VIA SSE)
   // =========================
   useEffect(() => {
     if (!mounted) return;
@@ -75,6 +63,7 @@ export default function OverlayPage() {
         payload?.parsed?.players?.[0]?.name || "";
       const ocrTeam = payload?.parsed?.team || "";
 
+      // Show OCR input always
       setOcrDebug({
         ocrPlayer,
         ocrTeam,
@@ -105,11 +94,10 @@ export default function OverlayPage() {
             bestMatch = {
               matchedPlayer: player.playerName,
               matchedTeam: team.teamName,
-              matchedteamlogo: team.teamImage,
-              matchedplayerimage: player.playerImage,
+              teamImage: team.teamImage,
+              playerImage: player.playerImage,
               score,
             };
-            console.log(team.teamImage)
           }
         }
       }
@@ -130,27 +118,49 @@ export default function OverlayPage() {
   }, [mounted, dbTeams]);
 
   // =========================
-  // RENDER (DEBUG MODE)
+  // RENDER (DEBUG UI)
   // =========================
   if (!mounted) {
-    return <div style={{ background: "#000", minHeight: "100vh" }} />;
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#000",
+        }}
+      />
+    );
   }
 
   return (
     <div
       style={{
         minHeight: "100vh",
-        color: "",
+        background: "",
+        color: "#0000",
         padding: 14,
-        paddingTop: "400px",
+        paddingTop: 300,
         fontFamily: "monospace",
-        fontSize: 34,
-        height: "1080px",
-        width: "1920px",
+        fontSize: 24,
       }}
     >
-      
+      <h3>🧪 OCR → DB MATCH DEBUG</h3>
 
+      <hr />
+
+      {/* OCR DATA */}
+      <div>
+        <strong>OCR PLAYER:</strong>{" "}
+        {ocrDebug?.ocrPlayer || "—"}
+      </div>
+
+      <div>
+        <strong>OCR TEAM:</strong>{" "}
+        {ocrDebug?.ocrTeam || "—"}
+      </div>
+
+      <hr />
+
+      {/* MATCH RESULT */}
       {matchDebug ? (
         <>
           <div>
@@ -168,28 +178,31 @@ export default function OverlayPage() {
             {matchDebug.score.toFixed(2)}
           </div>
 
-         
           <div>
-            <strong>team logo:</strong>{" "}
-            <Image
-            src={matchDebug.matchedteamlogo} 
-            height={150}
-            width={200}
-            alt= {"player name"}
-            />
-            
+            <strong>STATUS:</strong>{" "}
+            {matchDebug.status}
           </div>
 
-          <div>
-            <strong>player image:</strong>{" "}
-            <Image
-            src={matchDebug.matchedplayerimage} 
-            height={150}
-            width={200}
-            alt= {"player name"}
+          <div style={{ marginTop: 8 }}>
+            <strong>TEAM LOGO:</strong>
+            <br />
+            <img
+              src={matchDebug.teamImage}
+              height={20}
+              width={200}
+              alt="team logo"
             />
-            
-            
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <strong>PLAYER IMAGE:</strong>
+            <br />
+            <img
+              src={matchDebug.playerImage}
+              height={40}
+              width={200}
+              alt="player"
+            />
           </div>
         </>
       ) : (

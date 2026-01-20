@@ -1,31 +1,23 @@
 import { NextRequest } from "next/server";
 
-let latestData: any = null;
-const clients = new Set<ReadableStreamDefaultController>();
+export const runtime = "nodejs";
 
-// ============================
-// GET — Browser connects (SSE)
-// ============================
-export async function GET() {
-  const stream = new ReadableStream({
-    start(controller) {
-      console.log("[SSE] Client connected");
-      clients.add(controller);
+let clients: WritableStreamDefaultWriter[] = [];
 
-      // ✅ REPLAY LATEST DATA TO NEW CLIENT
-      if (latestData) {
-        controller.enqueue(
-          `data: ${JSON.stringify(latestData)}\n\n`
-        );
-      }
-    },
-    cancel(controller) {
-      console.log("[SSE] Client disconnected");
-      clients.delete(controller);
-    },
+export async function GET(req: NextRequest) {
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
+
+  clients.push(writer);
+
+  req.signal.addEventListener("abort", () => {
+    clients = clients.filter((w) => w !== writer);
+    try {
+      writer.close();
+    } catch {}
   });
 
-  return new Response(stream, {
+  return new Response(stream.readable, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -34,27 +26,23 @@ export async function GET() {
   });
 }
 
-// ============================
-// POST — OCR pushes data
-// ============================
+// 🔥 OCR PUSH ENDPOINT
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  latestData = body;
+  const data = await req.json();
 
-  console.log("[OCR → SSE] New OCR data received");
+  const payload = `data: ${JSON.stringify(data)}\n\n`;
 
-  for (const controller of clients) {
+  clients = clients.filter((writer) => {
     try {
-      controller.enqueue(
-        `data: ${JSON.stringify(latestData)}\n\n`
-      );
+      writer.write(payload);
+      return true;
     } catch {
-      console.warn("[SSE] Removing dead client");
-      clients.delete(controller);
+      return false;
     }
-  }
-
-  return new Response(JSON.stringify({ ok: true }), {
-    headers: { "Content-Type": "application/json" },
   });
+
+  return new Response(
+    JSON.stringify({ ok: true, clients: clients.length }),
+    { status: 200 }
+  );
 }
