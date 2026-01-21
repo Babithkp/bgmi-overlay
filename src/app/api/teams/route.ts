@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { uploadToS3, deleteFromS3, extractS3Key } from "@/lib/s3";
+import { prisma } from "../../../lib/prisma";
+import { uploadToS3, deleteFromS3, extractS3Key } from "../../../lib/s3";
 
 // 🔴 CRITICAL: Prisma + S3 MUST run in Node
 export const runtime = "nodejs";
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     const teamsData = JSON.parse(teamsJson);
 
     for (const teamData of teamsData) {
-      const { slotNumber, teamName, players = [] } = teamData;
+      const { slotNumber, teamName, players, teamColor = [] } = teamData;
       const slot = Number(slotNumber);
 
       const existingTeam = await prisma.team.findUnique({
@@ -86,11 +86,13 @@ export async function POST(req: Request) {
         update: {
           teamName,
           teamImage: teamImageUrl ?? undefined,
+          teamColor
         },
         create: {
           slotNumber: slot,
           teamName,
           teamImage: teamImageUrl,
+          teamColor,
         },
       });
 

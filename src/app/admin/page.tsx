@@ -16,6 +16,7 @@ interface Team {
   slotNumber: number;
   teamImage: string | null;
   players: Player[];
+  teamColor: string | null;
 }
 
 
@@ -215,6 +216,10 @@ function EmptySlot({
   const [teamName, setTeamName] = useState("");
   const [playerNames, setPlayerNames] = useState<string[]>(Array(4).fill(""));
   const [loading, setLoading] = useState(false);
+  const [teamColor, setTeamColor] = useState("#ffffff");
+
+
+
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -222,11 +227,12 @@ function EmptySlot({
 
     try {
       const formData = new FormData();
-      
+
       // Prepare teams data for API
       const teamsData = [{
         slotNumber,
         teamName: teamName || `Team ${slotNumber}`,
+        teamColor,
         players: playerNames.map((name) => ({ playerName: name })),
       }];
 
@@ -303,6 +309,14 @@ function EmptySlot({
         placeholder="Team Name"
         className="w-full px-2 py-1 bg-gray-700 rounded text-white mb-2 text-sm"
       />
+      <label className="text-xs text-gray-400">Team Color</label>
+      <input
+        type="color"
+        value={teamColor}
+        onChange={(e) => setTeamColor(e.target.value)}
+        className="w-full h-10 rounded cursor-pointer"
+      />
+
       <div className="space-y-2 mb-3">
         {Array.from({ length: 4 }).map((_, idx) => (
           <div key={idx} className="space-y-1">
@@ -340,6 +354,7 @@ function EmptySlot({
             setIsAdding(false);
             setTeamName("");
             setPlayerNames(Array(4).fill(""));
+            setTeamColor("#ffffff");
           }}
           className="flex-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 rounded text-sm font-medium"
         >
@@ -368,6 +383,11 @@ function TeamSlot({
   const [teamName, setTeamName] = useState(team?.teamName || '');
   const [playerNames, setPlayerNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [teamColor, setTeamColor] = useState(team?.teamColor || "#ffffff");
+
+  useEffect(() => {
+    setTeamColor(team?.teamColor || "#ffffff");
+  }, [team]);
 
   useEffect(() => {
     setSlotInput(slotNumber.toString());
@@ -392,6 +412,7 @@ function TeamSlot({
     setLoading(true);
     try {
       const formData = new FormData();
+      formData.append("teamColor", teamColor);
       formData.append('teamName', teamName);
       formData.append('slotNumber', slotNumber.toString());
 
@@ -435,8 +456,8 @@ function TeamSlot({
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border-2 border-gray-700 min-h-[300px]">
-      <div className="mb-2">
+    <div className="bg-gray-800 rounded-lg p-4 border-2 border-gray-700 min-h-[300px]" style={{ borderColor: team?.teamColor || "#E4E5E7" }}>
+      <div className="mb-2" >
         <label className="text-sm text-gray-400">Slot</label>
         <input
           type="number"
@@ -468,7 +489,7 @@ function TeamSlot({
 
       {team ? (
         isEditing ? (
-          <form onSubmit={handleSave} className="space-y-3">
+          <form onSubmit={handleSave} className="space-y-3" >
             <div className="mb-2">
               {team.teamImage ? (
                 <Image
@@ -478,6 +499,7 @@ function TeamSlot({
                   height={100}
                   className="w-full h-24 object-cover rounded"
                   unoptimized
+                  loading="eager"
                 />
               ) : (
                 <div className="w-full h-24 bg-gray-700 rounded flex items-center justify-center text-gray-500 text-sm">
@@ -498,6 +520,14 @@ function TeamSlot({
               placeholder="Team Name"
               className="w-full px-2 py-1 bg-gray-700 rounded text-white mb-2 text-sm"
             />
+            <label className="text-xs text-gray-400">Team Color</label>
+            <input
+              type="color"
+              value={teamColor}
+              onChange={(e) => setTeamColor(e.target.value)}
+              className="w-full h-10 rounded cursor-pointer"
+            />
+
             <div className="space-y-2 mb-3">
               {Array.from({ length: 4 }).map((_, idx) => (
                 <div key={idx} className="space-y-1">
@@ -537,6 +567,7 @@ function TeamSlot({
                   setIsEditing(false);
                   setTeamName(team.teamName);
                   setPlayerNames(sortedPlayers.map((p) => p.playerName || ''));
+                  setTeamColor(team.teamColor || "#ffffff");
                 }}
                 className="flex-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 rounded text-sm font-medium"
               >
@@ -570,7 +601,7 @@ function TeamSlot({
             />
             <div className="space-y-1 mb-3">
               {sortedPlayers.map((player, idx) => (
-                <div key={player.id || idx} className="flex gap-2 items-center">
+                <div key={player.id || idx} className="flex gap-2 items-center "   >
                   {player.playerImage ? (
                     <Image
                       src={player.playerImage}

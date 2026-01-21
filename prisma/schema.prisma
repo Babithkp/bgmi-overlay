@@ -8,24 +8,25 @@ datasource db {
 }
 
 model Team {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  teamName    String
-  slotNumber  Int      @unique
-  teamImage   String?  // S3 URL
-  players     Player[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  teamName   String
+  slotNumber Int      @unique
+  teamImage  String? // S3 URL
+  teamColor String?
+  players    Player[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@map("teams")
 }
 
 model Player {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  teamId      String   @db.ObjectId
-  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  teamId      String  @db.ObjectId
+  team        Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   playerName  String
-  playerImage String?  // S3 URL
-  position    Int      // 1-4 for the 4 players
+  playerImage String? // S3 URL
+  position    Int // 1-4 for the 4 players
 
   @@map("players")
 }

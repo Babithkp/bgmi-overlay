@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { deleteFromS3, extractS3Key } from '@/lib/s3';
+import { prisma } from '../../../../../lib/prisma';
+import { deleteFromS3, extractS3Key } from '../../../../../lib/s3';
 
 export async function POST(
   req: Request,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { uploadToS3, deleteFromS3, extractS3Key } from '@/lib/s3';
+import { prisma } from '../../../../lib/prisma';
+import { uploadToS3, deleteFromS3, extractS3Key } from '../../../../lib/s3';
 
 export async function PATCH(
   req: Request,
@@ -12,12 +12,18 @@ export async function PATCH(
 
     // Check if request is FormData (for updating with images) or JSON (for slot change)
     const contentType = req.headers.get('content-type') || '';
-    
+
     if (contentType.includes('multipart/form-data')) {
       // Handle team update with images
       const formData = await req.formData();
       const slotNumberStr = formData.get('slotNumber') as string;
-      
+      const teamColor = formData.get("teamColor") as string | null;
+      if (teamColor) {
+        await prisma.team.update({
+          where: { id: teamId },
+          data: { teamColor },
+        });
+      }
       const team = await prisma.team.findUnique({
         where: { id: teamId },
         include: { players: true },
@@ -48,15 +54,15 @@ export async function PATCH(
       for (let i = 0; i < 4; i++) {
         const playerName = formData.get(`playerName-${i}`) as string;
         const playerImageFile = formData.get(`playerImage-${i}`) as File | null;
-        
+
         const existingPlayer = team.players.find((p) => p.position === i + 1);
-        
+
         if (playerImageFile && playerImageFile.size > 0) {
           const buffer = Buffer.from(await playerImageFile.arrayBuffer());
           const ext = playerImageFile.name.split('.').pop() || 'jpg';
           const key = `players/${team.slotNumber}-${i}-${Date.now()}.${ext}`;
           const playerImageUrl = await uploadToS3(buffer, key, playerImageFile.type);
-          
+
           // Delete old player image if exists
           if (existingPlayer?.playerImage) {
             const oldKey = extractS3Key(existingPlayer.playerImage);
@@ -126,8 +132,9 @@ export async function PATCH(
 
       const team = await prisma.team.update({
         where: { id: teamId },
-        data: { slotNumber: parseInt(slotNumber) },
+        data: { slotNumber: parseInt(slotNumber), },
         include: { players: true },
+
       });
 
       return NextResponse.json(team);
