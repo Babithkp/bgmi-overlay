@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { Roboto_Condensed } from "next/font/google";
 import "./globals.css";
-
 const robotoCondensed = Roboto_Condensed({
   subsets: ["latin"],
-  weight: ["700"], 
+  weight: ["700"],
   variable: "--font-roboto-condensed",
 });
 
@@ -21,7 +20,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={robotoCondensed.variable}>
       <body className="antialiased">
-        {children}
+          {children}
       </body>
     </html>
   );

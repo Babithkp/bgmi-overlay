@@ -11,7 +11,7 @@ model Team {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   teamName   String
   slotNumber Int      @unique
-  teamImage  String? // S3 URL
+  teamImage  String? 
   teamColor String?
   players    Player[]
   createdAt  DateTime @default(now())

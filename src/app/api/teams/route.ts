@@ -28,9 +28,7 @@ export async function GET() {
   }
 }
 
-// ==============================
-// POST CREATE / UPDATE TEAMS
-// ==============================
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -44,9 +42,11 @@ export async function POST(req: Request) {
     }
 
     const teamsData = JSON.parse(teamsJson);
+    
 
     for (const teamData of teamsData) {
-      const { slotNumber, teamName, players, teamColor = [] } = teamData;
+      const { slotNumber, teamName, players, teamColor} = teamData;
+      
       const slot = Number(slotNumber);
 
       const existingTeam = await prisma.team.findUnique({

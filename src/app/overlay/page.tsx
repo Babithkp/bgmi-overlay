@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { useNumbers } from "@/lib/Context";
 
-/* ===================== TYPES ===================== */
 
 interface Player {
   id: string;
@@ -30,7 +30,6 @@ interface MatchDebug {
   score: number;
 }
 
-/* ===================== SIMILARITY ===================== */
 
 function similarity(a: string, b: string): number {
   a = a.toLowerCase();
@@ -47,22 +46,21 @@ function similarity(a: string, b: string): number {
   return matches / Math.max(a.length, b.length);
 }
 
-/* ===================== THRESHOLDS ===================== */
 
-const DIRECT_PLAYER_THRESHOLD = 0.75;
+const DIRECT_PLAYER_THRESHOLD = 0.65;
 const TEAM_THRESHOLD = 0.45;
 const PLAYER_IN_TEAM_THRESHOLD = 0.55;
 
-/* ===================== PAGE ===================== */
 
 export default function OverlayPage() {
   const [dbTeams, setDbTeams] = useState<Team[]>([]);
   const [matchDebug, setMatchDebug] = useState<MatchDebug | null>(null);
-  const [ocrresult, setOcrResult] = useState<string>("");
-
+  const [uiposion, setUiposition] = useState({
+    TeamShortLogoTop: 57,
+    TeamShortLogoLeft: 10,
+  });
   const isClient = typeof window !== "undefined";
 
-  /* ===================== LOAD TEAMS ===================== */
   useEffect(() => {
     if (!isClient) return;
 
@@ -74,7 +72,6 @@ export default function OverlayPage() {
       .catch(() => console.error("Failed to load admin teams"));
   }, [isClient]);
 
-  /* ===================== OCR STREAM ===================== */
   useEffect(() => {
     if (!isClient) return;
     if (dbTeams.length === 0) return;
@@ -89,36 +86,82 @@ export default function OverlayPage() {
         return;
       }
 
-      const ocrPlayer =
-        (payload as {
-          parsed?: { players?: { name?: string }[] };
-        })?.parsed?.players?.[0]?.name ?? "";
-        console.log(payload);
 
-      if (!ocrPlayer) {
+
+      type OCRPayload = {
+        parsed?: {
+          players?: { name?: string }[];
+        };
+        raw_text?: string[];
+        ui_position?: {
+          TeamShortLogoTop: number;
+          TeamShortLogoLeft: number;
+        };
+      };
+
+      const ocrPayload = payload as OCRPayload;
+
+      if (ocrPayload.ui_position) {
+        setUiposition({
+          TeamShortLogoTop: ocrPayload.ui_position.TeamShortLogoTop,
+          TeamShortLogoLeft: ocrPayload.ui_position.TeamShortLogoLeft,
+        });
+      }
+
+      const ocrTokens: string[] = [
+        ...(ocrPayload.parsed?.players
+          ?.map((p) => p.name)
+          .filter((v): v is string => Boolean(v)) ?? []),
+        ...(ocrPayload.raw_text
+          ?.filter((v): v is string => Boolean(v)) ?? []),
+      ];
+
+      if (ocrTokens.length === 0) {
         setMatchDebug(null);
         return;
       }
 
-      /* =====================================================
-         PHASE 1: DIRECT PLAYER MATCH (GLOBAL)
-      ===================================================== */
+      const normalizeOCR = (text: string): string =>
+        text
+          .toLowerCase()
+          .replace(/[0]/g, "o")
+          .replace(/[1|i|l]/g, "l")
+          .replace(/[7]/g, "l")
+          .replace(/[5]/g, "s")
+          .replace(/[^a-z]/g, "")
+          .trim();
+
+      const cleanTokens = ocrTokens
+        .map(normalizeOCR)
+        .filter((t) => t.length >= 3 && t.length <= 25);
+
+      if (cleanTokens.length === 0) {
+        setMatchDebug(null);
+        return;
+      }
+
+
       let bestDirectScore = 0;
       let directTeam: Team | null = null;
       let directPlayer: Player | null = null;
 
-      for (const team of dbTeams) {
-        if (!team.teamImage) continue;
+      for (const token of cleanTokens) {
+        for (const team of dbTeams) {
+          if (!team.teamImage) continue;
 
-        for (const player of team.players) {
-          if (!player.playerImage) continue;
+          for (const player of team.players) {
+            if (!player.playerImage) continue;
 
-          const score = similarity(ocrPlayer, player.playerName);
+            const score = similarity(
+              token,
+              normalizeOCR(player.playerName)
+            );
 
-          if (score > bestDirectScore) {
-            bestDirectScore = score;
-            directTeam = team;
-            directPlayer = player;
+            if (score > bestDirectScore) {
+              bestDirectScore = score;
+              directTeam = team;
+              directPlayer = player;
+            }
           }
         }
       }
@@ -139,17 +182,21 @@ export default function OverlayPage() {
         return;
       }
 
-      /* =====================================================
-         PHASE 2: TEAM MATCH → PLAYER MATCH
-      ===================================================== */
+
       let bestTeam: Team | null = null;
       let bestTeamScore = 0;
 
-      for (const team of dbTeams) {
-        const score = similarity(ocrPlayer, team.teamName);
-        if (score > bestTeamScore) {
-          bestTeamScore = score;
-          bestTeam = team;
+      for (const token of cleanTokens) {
+        for (const team of dbTeams) {
+          const score = similarity(
+            token,
+            normalizeOCR(team.teamName)
+          );
+
+          if (score > bestTeamScore) {
+            bestTeamScore = score;
+            bestTeam = team;
+          }
         }
       }
 
@@ -161,11 +208,17 @@ export default function OverlayPage() {
       let bestPlayer: Player | null = null;
       let bestPlayerScore = 0;
 
-      for (const player of bestTeam.players) {
-        const score = similarity(ocrPlayer, player.playerName);
-        if (score > bestPlayerScore) {
-          bestPlayerScore = score;
-          bestPlayer = player;
+      for (const token of cleanTokens) {
+        for (const player of bestTeam.players) {
+          const score = similarity(
+            token,
+            normalizeOCR(player.playerName)
+          );
+
+          if (score > bestPlayerScore) {
+            bestPlayerScore = score;
+            bestPlayer = player;
+          }
         }
       }
 
@@ -194,59 +247,77 @@ export default function OverlayPage() {
   }, [dbTeams, isClient]);
 
 
-  if (!isClient) {
-    return <div style={{ width: "1920px", height: "1080px" }} />;
-  }
+
+  // if (!isClient) {
+  //   return <div style={{ width: "1920px", height: "1080px" }} />;
+  // }
 
 
   return (
     <div
       style={{
-        width: "1920px",
-        height: "1080px",
+        flex: "flex",
       }}
     // className="bg-black"
     >
-
       {matchDebug && (
-        <div className="relative">
-
-
+        <div className="relative ">
           <div
-            style={{ marginTop: 51, marginLeft: 3 }}
-            className="relative w-20 h-9 overflow-hidden"
+            style={{
+              top: `${uiposion.TeamShortLogoTop}px`,
+              left: `${uiposion.TeamShortLogoLeft}px`,
+            }}
+            className="absolute bg-white w-[100px] h-[32px] overflow-hidden"
           >
             <Image
               src={matchDebug.teamImage}
               alt="team logo"
               fill
-              className="object-cover object-center h-10 w-10"
+              className="object-cover object-center -rotate-20 scale-[1.6]"
               unoptimized
             />
           </div>
 
-          <div className=" w-fit mt-196 ml-161 flex">
-            <Image
-              src={matchDebug.teamImage}
-              height={150}
-              width={62}
-              alt="team logo"
-              className="object-cover h-17 w-17 bg-black"
-            />
-            <div className={`   text-white top-0 left-17 w-50 h-fit`}
+          <div className="absolute    flex "
+          style={{
+            top: `${866}px`,
+            left: `${644}px`,
+          }}
+          >
+
+            <div className=" w-[70px] h-[70px]  bg-black/80 overflow-hidden">
+              <Image
+                src={matchDebug.teamImage}
+                height={150}
+                width={62}
+                alt="team logo"
+                className="object-cover object-center size-full"
+                unoptimized
+              />
+            </div>
+            <div className={`   text-white top-0 left-17 w-60 h-10 pt-1`}
               style={{ background: matchDebug.color ?? "black", clipPath: "polygon(0 0, 85% 0, 100% 100%, 0% 100%)", }}
             >
-              <p className="text-2xl font-boldD ml-3 font-overlay">{matchDebug.matchedTeam}</p>
-            </div>
-          </div>
+              <p className="text-2xl font-bold w-full ml-3 font-overlay">
+                {matchDebug.matchedPlayer}
 
-          <div className="absolute top-213 left-325 bg-black/90">
+              </p>
+            </div>
+
+          </div>
+          <div 
+          style={{
+            top: `${897}px`,
+            left: `${1280}px`,
+          }}
+          className="absolute  w-[174px] h-[174px] overflow-hidden 
+             bg-black/70">
             <Image
               src={matchDebug.playerImage}
-              height={40}
-              width={200}
               alt="player"
-              className="object-cover h-50 w-50 object-center"
+              fill
+              className="object-cover object-center"
+              unoptimized
             />
           </div>
         </div>

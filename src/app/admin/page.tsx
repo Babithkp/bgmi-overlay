@@ -96,26 +96,7 @@ export default function AdminPage() {
     }
   };
 
-  const handleSlotChange = async (teamId: string, newSlot: number) => {
-    if (newSlot < 1 || newSlot > 25) return;
 
-    try {
-      const res = await fetch(`/api/teams/${teamId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slotNumber: newSlot }),
-      });
-      if (res.ok) {
-        await fetchTeams();
-      } else {
-        const error = await res.json();
-        alert(error.error || "Failed to update slot");
-      }
-    } catch (error) {
-      console.error("Failed to update slot:", error);
-      alert("Failed to update slot");
-    }
-  };
 
   const handleResetTeam = async (teamId: string) => {
     if (!confirm("Are you sure you want to reset this team? All images will be deleted from S3.")) return;
@@ -158,6 +139,28 @@ export default function AdminPage() {
     return acc;
   }, {} as Record<number, Team>);
 
+  const handleSlotSwap = async (teamId: string, targetSlot: number) => {
+    try {
+      const res = await fetch("/api/teams/swap", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceTeamId: teamId,
+          targetSlot,
+        }),
+      });
+
+      if (res.ok) {
+        await fetchTeams();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to swap slots");
+      }
+    } catch (err) {
+      console.error("Swap failed:", err);
+      alert("Swap failed");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -177,6 +180,7 @@ export default function AdminPage() {
               />
             </label>
             <button
+              suppressHydrationWarning
               onClick={handleResetAll}
               className="px-6 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-semibold"
             >
@@ -193,9 +197,9 @@ export default function AdminPage() {
                 key={slot}
                 slotNumber={slot}
                 team={team}
-                onSlotChange={handleSlotChange}
                 onReset={handleResetTeam}
                 onUpdate={fetchTeams}
+                onSlotSwap={handleSlotSwap}
               />
             );
           })}
@@ -368,17 +372,16 @@ function EmptySlot({
 function TeamSlot({
   slotNumber,
   team,
-  onSlotChange,
   onReset,
   onUpdate,
+  onSlotSwap,
 }: {
   slotNumber: number;
   team?: Team;
-  onSlotChange: (teamId: string, newSlot: number) => void;
   onReset: (teamId: string) => void;
-  onUpdate: () => void;
+  onUpdate: () => Promise<void>;
+  onSlotSwap: (teamId: string, targetSlot: number) => void;
 }) {
-  const [slotInput, setSlotInput] = useState(slotNumber.toString());
   const [isEditing, setIsEditing] = useState(false);
   const [teamName, setTeamName] = useState(team?.teamName || '');
   const [playerNames, setPlayerNames] = useState<string[]>([]);
@@ -389,9 +392,6 @@ function TeamSlot({
     setTeamColor(team?.teamColor || "#ffffff");
   }, [team]);
 
-  useEffect(() => {
-    setSlotInput(slotNumber.toString());
-  }, [slotNumber]);
 
   useEffect(() => {
     setTeamName(team?.teamName || '');
@@ -414,7 +414,6 @@ function TeamSlot({
       const formData = new FormData();
       formData.append("teamColor", teamColor);
       formData.append('teamName', teamName);
-      formData.append('slotNumber', slotNumber.toString());
 
       // Add player names
       playerNames.forEach((name, idx) => {
@@ -455,36 +454,42 @@ function TeamSlot({
     }
   };
 
+
+
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border-2 border-gray-700 min-h-[300px]" style={{ borderColor: team?.teamColor || "#E4E5E7" }}>
+    <div
+
+      draggable={!!team}
+      onDragStart={(e) => {
+        if (!team) return;
+        e.dataTransfer.setData("teamId", team.id);
+        e.dataTransfer.setData("sourceSlot", slotNumber.toString());
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.currentTarget.classList.add("ring-2", "ring-blue-500");
+      }}
+      onDragLeave={(e) => {
+        e.currentTarget.classList.remove("ring-2", "ring-blue-500");
+      }}
+      onDrop={async (e) => {
+        e.preventDefault();
+        const teamId = e.dataTransfer.getData("teamId");
+        const sourceSlot = Number(e.dataTransfer.getData("sourceSlot"));
+
+        if (!teamId || sourceSlot === slotNumber) return;
+
+        await onSlotSwap(teamId, slotNumber);
+      }}
+      className="bg-gray-800 rounded-lg p-4 border-2 border-gray-700 min-h-[300px]" style={{ borderColor: team?.teamColor || "#E4E5E7" }}>
       <div className="mb-2" >
         <label className="text-sm text-gray-400">Slot</label>
         <input
-          type="number"
-          min="1"
-          max="25"
-          value={slotInput}
-          onChange={(e) => setSlotInput(e.target.value)}
-          onBlur={() => {
-            const newSlot = parseInt(slotInput);
-            if (team && !isNaN(newSlot) && newSlot >= 1 && newSlot <= 25) {
-              onSlotChange(team.id, newSlot);
-            } else {
-              setSlotInput(slotNumber.toString());
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              const newSlot = parseInt(slotInput);
-              if (team && !isNaN(newSlot) && newSlot >= 1 && newSlot <= 25) {
-                onSlotChange(team.id, newSlot);
-              } else {
-                setSlotInput(slotNumber.toString());
-              }
-            }
-          }}
-          className="w-full px-2 py-1 bg-gray-700 rounded text-white"
-        />
+  type="number"
+  value={slotNumber}
+  readOnly
+  className="w-full px-2 py-1 bg-gray-700 rounded text-white cursor-not-allowed"
+ />
       </div>
 
       {team ? (
