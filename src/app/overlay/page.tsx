@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { useNumbers } from "@/lib/Context";
 
 
 interface Player {
