@@ -21,8 +21,8 @@ interface Team {
 }
 
 interface MatchDebug {
-  matchedPlayer: string;
-  matchedTeam: string;
+  playerName: string;
+  teamName: string;
   teamImage: string;
   playerImage: string;
   color: string | null;
@@ -49,15 +49,23 @@ function similarity(a: string, b: string): number {
 const DIRECT_PLAYER_THRESHOLD = 0.65;
 const TEAM_THRESHOLD = 0.45;
 const PLAYER_IN_TEAM_THRESHOLD = 0.55;
-
+const defaultUI = {
+  TeamShortLogoTop: 57,
+  TeamShortLogoLeft: 10,
+  TeamShortLogoWidth: 100,
+  TeamShortLogoHeight: 32,
+  TeamLogoTop: 866,
+  TeamLogoLeft: 644,
+  TeamLogoSize: 70,
+  PlayerImgTop: 897,
+  PlayerImgLeft: 1280,
+  PlayerImgSize: 174,
+};
 
 export default function OverlayPage() {
   const [dbTeams, setDbTeams] = useState<Team[]>([]);
   const [matchDebug, setMatchDebug] = useState<MatchDebug | null>(null);
-  const [uiposion, setUiposition] = useState({
-    TeamShortLogoTop: 57,
-    TeamShortLogoLeft: 10,
-  });
+  const [uiposion, setUiposition] = useState(defaultUI);
   const isClient = typeof window !== "undefined";
 
   useEffect(() => {
@@ -95,17 +103,30 @@ export default function OverlayPage() {
         ui_position?: {
           TeamShortLogoTop: number;
           TeamShortLogoLeft: number;
+          TeamShortLogoWidth: number;
+          TeamShortLogoHeight: number;
+          TeamLogoTop: number;
+          TeamLogoLeft: number;
+          TeamLogoSize: number;
+          PlayerImgTop: number;
+          PlayerImgLeft: number;
+          PlayerImgSize: number;
         };
       };
 
       const ocrPayload = payload as OCRPayload;
 
-      if (ocrPayload.ui_position) {
-        setUiposition({
-          TeamShortLogoTop: ocrPayload.ui_position.TeamShortLogoTop,
-          TeamShortLogoLeft: ocrPayload.ui_position.TeamShortLogoLeft,
-        });
+      const ui = ocrPayload.ui_position;
+      console.log(payload);
+      
+
+      if (ui && Object.keys(ui).length > 0) {
+        setUiposition(prev => ({
+          ...prev,
+          ...ui,
+        }));
       }
+      
 
       const ocrTokens: string[] = [
         ...(ocrPayload.parsed?.players
@@ -171,8 +192,8 @@ export default function OverlayPage() {
         bestDirectScore >= DIRECT_PLAYER_THRESHOLD
       ) {
         setMatchDebug({
-          matchedPlayer: directPlayer.playerName,
-          matchedTeam: directTeam.teamName,
+          playerName: directPlayer.playerName,
+          teamName: directTeam.teamName,
           teamImage: directTeam.teamImage!,
           playerImage: directPlayer.playerImage!,
           color: directTeam.teamColor,
@@ -232,8 +253,8 @@ export default function OverlayPage() {
       }
 
       setMatchDebug({
-        matchedPlayer: bestPlayer.playerName,
-        matchedTeam: bestTeam.teamName,
+        playerName: bestPlayer.playerName,
+        teamName: bestTeam.teamName,
         teamImage: bestTeam.teamImage,
         playerImage: bestPlayer.playerImage,
         color: bestTeam.teamColor,
@@ -254,19 +275,19 @@ export default function OverlayPage() {
 
   return (
     <div
-      style={{
-        flex: "flex",
-      }}
     // className="bg-black"
     >
       {matchDebug && (
         <div className="relative ">
           <div
             style={{
+              position: "absolute",
               top: `${uiposion.TeamShortLogoTop}px`,
               left: `${uiposion.TeamShortLogoLeft}px`,
+              width: `${uiposion.TeamShortLogoWidth}px`,
+              height: `${uiposion.TeamShortLogoHeight}px`,
             }}
-            className="absolute bg-white w-[100px] h-[32px] overflow-hidden"
+            className=" bg-white  overflow-hidden"
           >
             <Image
               src={matchDebug.teamImage}
@@ -277,14 +298,19 @@ export default function OverlayPage() {
             />
           </div>
 
-          <div className="absolute    flex "
-          style={{
-            top: `${866}px`,
-            left: `${644}px`,
-          }}
+          <div className="absolute flex overflow-hidden"
+            style={{
+              top: `${uiposion.TeamLogoTop}px`,
+              left: `${uiposion.TeamLogoLeft}px`,
+            }}
           >
+            <div
+              style={{
+                width: `${uiposion.TeamLogoSize}px`,
+                height: `${uiposion.TeamLogoSize}px`,
+              }}
+            >
 
-            <div className=" w-[70px] h-[70px]  bg-black/80 overflow-hidden">
               <Image
                 src={matchDebug.teamImage}
                 height={150}
@@ -298,19 +324,21 @@ export default function OverlayPage() {
               style={{ background: matchDebug.color ?? "black", clipPath: "polygon(0 0, 85% 0, 100% 100%, 0% 100%)", }}
             >
               <p className="text-2xl font-bold w-full ml-3 font-overlay">
-                {matchDebug.matchedPlayer}
-
+                {matchDebug.teamName}
               </p>
             </div>
 
           </div>
-          <div 
-          style={{
-            top: `${897}px`,
-            left: `${1280}px`,
-          }}
-          className="absolute  w-[174px] h-[174px] overflow-hidden 
+          <div
+            style={{
+              top: `${uiposion.PlayerImgTop}px`,
+              left: `${uiposion.PlayerImgLeft}px`,
+              width: `${uiposion.PlayerImgSize}px`,
+              height: `${uiposion.PlayerImgSize}px`,
+            }}
+            className="absolute overflow-hidden 
              bg-black/70">
+              
             <Image
               src={matchDebug.playerImage}
               alt="player"
