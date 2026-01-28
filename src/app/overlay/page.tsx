@@ -117,7 +117,6 @@ export default function OverlayPage() {
       const ocrPayload = payload as OCRPayload;
 
       const ui = ocrPayload.ui_position;
-      console.log(payload);
       
 
       if (ui && Object.keys(ui).length > 0) {
@@ -144,10 +143,17 @@ export default function OverlayPage() {
       const normalizeOCR = (text: string): string =>
         text
           .toLowerCase()
-          .replace(/[0]/g, "o")
-          .replace(/[1|i|l]/g, "l")
-          .replace(/[7]/g, "l")
-          .replace(/[5]/g, "s")
+          .replace(/@/g, "q")
+          .replace(/d/g, "q")
+          .replace(/0/g, "o")
+          .replace(/[1il]/g, "l")
+          .replace(/7/g, "l")
+          .replace(/5/g, "s")
+      
+          // Collapse repeats
+          .replace(/(.)\1{2,}/g, "$1")
+      
+          // Kill non-letters
           .replace(/[^a-z]/g, "")
           .trim();
 
@@ -309,6 +315,7 @@ export default function OverlayPage() {
                 width: `${uiposion.TeamLogoSize}px`,
                 height: `${uiposion.TeamLogoSize}px`,
               }}
+              className="bg-black/90"
             >
 
               <Image
@@ -324,7 +331,7 @@ export default function OverlayPage() {
               style={{ background: matchDebug.color ?? "black", clipPath: "polygon(0 0, 85% 0, 100% 100%, 0% 100%)", }}
             >
               <p className="text-2xl font-bold w-full ml-3 font-overlay">
-                {matchDebug.teamName}
+                {matchDebug.playerName}
               </p>
             </div>
 
