@@ -46,9 +46,6 @@ function similarity(a: string, b: string): number {
 }
 
 
-const DIRECT_PLAYER_THRESHOLD = 0.65;
-const TEAM_THRESHOLD = 0.45;
-const PLAYER_IN_TEAM_THRESHOLD = 0.55;
 const defaultUI = {
   TeamShortLogoTop: 57,
   TeamShortLogoLeft: 10,
@@ -79,12 +76,24 @@ export default function OverlayPage() {
       .catch(() => console.error("Failed to load admin teams"));
   }, [isClient]);
 
+
+
   useEffect(() => {
     if (!isClient) return;
     if (dbTeams.length === 0) return;
-
+  
     const source = new EventSource("/api/ocr-stream");
-
+  
+    // ====== STABILITY STATE ======
+    let missCount = 0;
+    const MISS_THRESHOLD = 5;
+    let lastStableMatch: MatchDebug | null = null;
+  
+    function hasAnchor(a: string, b: string): boolean {
+      if (a.length < 4 || b.length < 4) return false;
+      return a.includes(b.slice(0, 4)) || b.includes(a.slice(0, 4));
+    }
+  
     source.onmessage = (event) => {
       let payload: unknown;
       try {
@@ -92,12 +101,11 @@ export default function OverlayPage() {
       } catch {
         return;
       }
-
-
-
+  
       type OCRPayload = {
         parsed?: {
           players?: { name?: string }[];
+          team?: string;
         };
         raw_text?: string[];
         ui_position?: {
@@ -113,33 +121,23 @@ export default function OverlayPage() {
           PlayerImgSize: number;
         };
       };
-
+  
       const ocrPayload = payload as OCRPayload;
-
-      const ui = ocrPayload.ui_position;
-      
-
-      if (ui && Object.keys(ui).length > 0) {
-        setUiposition(prev => ({
+  
+      if (ocrPayload.ui_position) {
+        setUiposition((prev) => ({
           ...prev,
-          ...ui,
+          ...ocrPayload.ui_position!,
         }));
       }
-      
-
+  
       const ocrTokens: string[] = [
         ...(ocrPayload.parsed?.players
           ?.map((p) => p.name)
           .filter((v): v is string => Boolean(v)) ?? []),
-        ...(ocrPayload.raw_text
-          ?.filter((v): v is string => Boolean(v)) ?? []),
+        ...(ocrPayload.raw_text ?? []),
       ];
-
-      if (ocrTokens.length === 0) {
-        setMatchDebug(null);
-        return;
-      }
-
+  
       const normalizeOCR = (text: string): string =>
         text
           .toLowerCase()
@@ -149,129 +147,72 @@ export default function OverlayPage() {
           .replace(/[1il]/g, "l")
           .replace(/7/g, "l")
           .replace(/5/g, "s")
-      
-          // Collapse repeats
           .replace(/(.)\1{2,}/g, "$1")
-      
-          // Kill non-letters
-          .replace(/[^a-z]/g, "")
+          .replace(/[^a-z0-9]/g, "")
           .trim();
-
+  
       const cleanTokens = ocrTokens
         .map(normalizeOCR)
         .filter((t) => t.length >= 3 && t.length <= 25);
-
-      if (cleanTokens.length === 0) {
-        setMatchDebug(null);
-        return;
-      }
-
-
-      let bestDirectScore = 0;
-      let directTeam: Team | null = null;
-      let directPlayer: Player | null = null;
-
+  
+      let bestScore = 0;
+      let bestTeam: Team | null = null;
+      let bestPlayer: Player | null = null;
+  
       for (const token of cleanTokens) {
         for (const team of dbTeams) {
-          if (!team.teamImage) continue;
-
           for (const player of team.players) {
-            if (!player.playerImage) continue;
-
-            const score = similarity(
-              token,
-              normalizeOCR(player.playerName)
-            );
-
-            if (score > bestDirectScore) {
-              bestDirectScore = score;
-              directTeam = team;
-              directPlayer = player;
+            if (!player.playerImage || !team.teamImage) continue;
+  
+            const playerKey = normalizeOCR(player.playerName);
+            if (!hasAnchor(token, playerKey)) continue;
+  
+            const score = similarity(token, playerKey);
+            if (score > bestScore) {
+              bestScore = score;
+              bestTeam = team;
+              bestPlayer = player;
             }
           }
         }
       }
-
+  
       if (
-        directTeam &&
-        directPlayer &&
-        bestDirectScore >= DIRECT_PLAYER_THRESHOLD
+        bestTeam &&
+        bestPlayer &&
+        bestScore >= 0.75
       ) {
-        setMatchDebug({
-          playerName: directPlayer.playerName,
-          teamName: directTeam.teamName,
-          teamImage: directTeam.teamImage!,
-          playerImage: directPlayer.playerImage!,
-          color: directTeam.teamColor,
-          score: bestDirectScore,
-        });
+        const match: MatchDebug = {
+          playerName: bestPlayer.playerName,
+          teamName: bestTeam.teamName,
+          teamImage: bestTeam.teamImage!,
+          playerImage: bestPlayer.playerImage!,
+          color: bestTeam.teamColor,
+          score: bestScore,
+        };
+  
+        lastStableMatch = match;
+        missCount = 0;  
+        setMatchDebug(match);
         return;
       }
 
-
-      let bestTeam: Team | null = null;
-      let bestTeamScore = 0;
-
-      for (const token of cleanTokens) {
-        for (const team of dbTeams) {
-          const score = similarity(
-            token,
-            normalizeOCR(team.teamName)
-          );
-
-          if (score > bestTeamScore) {
-            bestTeamScore = score;
-            bestTeam = team;
-          }
-        }
-      }
-
-      if (!bestTeam || bestTeamScore < TEAM_THRESHOLD) {
-        setMatchDebug(null);
+  
+      missCount++;
+  
+      if (lastStableMatch && missCount < MISS_THRESHOLD) {
+        setMatchDebug(lastStableMatch);
         return;
       }
-
-      let bestPlayer: Player | null = null;
-      let bestPlayerScore = 0;
-
-      for (const token of cleanTokens) {
-        for (const player of bestTeam.players) {
-          const score = similarity(
-            token,
-            normalizeOCR(player.playerName)
-          );
-
-          if (score > bestPlayerScore) {
-            bestPlayerScore = score;
-            bestPlayer = player;
-          }
-        }
-      }
-
-      if (
-        !bestPlayer ||
-        !bestTeam.teamImage ||
-        !bestPlayer.playerImage ||
-        bestPlayerScore < PLAYER_IN_TEAM_THRESHOLD
-      ) {
-        setMatchDebug(null);
-        return;
-      }
-
-      setMatchDebug({
-        playerName: bestPlayer.playerName,
-        teamName: bestTeam.teamName,
-        teamImage: bestTeam.teamImage,
-        playerImage: bestPlayer.playerImage,
-        color: bestTeam.teamColor,
-        score: bestPlayerScore,
-      });
+  
+      lastStableMatch = null;
+      setMatchDebug(null);
     };
-
+  
     source.onerror = () => source.close();
     return () => source.close();
   }, [dbTeams, isClient]);
-
+  
 
 
   // if (!isClient) {
