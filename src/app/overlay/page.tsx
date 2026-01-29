@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 
 interface Player {
@@ -78,21 +78,67 @@ export default function OverlayPage() {
 
 
 
+  const missCountRef = useRef(0);
+  const lastStableMatchRef = useRef<MatchDebug | null>(null);
+  const MISS_THRESHOLD = 5;
+  
+  const CHAR_EQUIV: Record<string, string[]> = {
+    "8": ["b"],
+    "b": ["8"],
+    "0": ["o"],
+    "o": ["0"],
+    "1": ["l"],
+    "l": ["1"],
+  };
+  
   useEffect(() => {
     if (!isClient) return;
     if (dbTeams.length === 0) return;
   
     const source = new EventSource("/api/ocr-stream");
   
-    // ====== STABILITY STATE ======
-    let missCount = 0;
-    const MISS_THRESHOLD = 5;
-    let lastStableMatch: MatchDebug | null = null;
-  
-    function hasAnchor(a: string, b: string): boolean {
+    function hasFuzzyAnchor(a: string, b: string): boolean {
       if (a.length < 4 || b.length < 4) return false;
-      return a.includes(b.slice(0, 4)) || b.includes(a.slice(0, 4));
+  
+      for (let i = 0; i <= a.length - 4; i++) {
+        const sub = a.slice(i, i + 4);
+  
+        for (let j = 0; j <= b.length - 4; j++) {
+          const target = b.slice(j, j + 4);
+  
+          let ok = true;
+          for (let k = 0; k < 4; k++) {
+            const ca = sub[k];
+            const cb = target[k];
+  
+            if (ca === cb) continue;
+            if (
+              CHAR_EQUIV[ca]?.includes(cb) ||
+              CHAR_EQUIV[cb]?.includes(ca)
+            ) continue;
+  
+            ok = false;
+            break;
+          }
+  
+          if (ok) return true;
+        }
+      }
+      return false;
     }
+  
+    const normalizeOCR = (text: string): string =>
+      text
+        .toLowerCase()
+        .replace(/@/g, "q")
+        .replace(/d/g, "q")
+        .replace(/0/g, "o")
+        .replace(/[1il]/g, "l")
+        .replace(/7/g, "l")
+        .replace(/5/g, "s")
+        .replace(/(.)\1{2,}/g, "$1")
+        .replace(/[^a-z0-9]/g, "")
+        .trim();
   
     source.onmessage = (event) => {
       let payload: unknown;
@@ -102,54 +148,19 @@ export default function OverlayPage() {
         return;
       }
   
-      type OCRPayload = {
-        parsed?: {
-          players?: { name?: string }[];
-          team?: string;
-        };
-        raw_text?: string[];
-        ui_position?: {
-          TeamShortLogoTop: number;
-          TeamShortLogoLeft: number;
-          TeamShortLogoWidth: number;
-          TeamShortLogoHeight: number;
-          TeamLogoTop: number;
-          TeamLogoLeft: number;
-          TeamLogoSize: number;
-          PlayerImgTop: number;
-          PlayerImgLeft: number;
-          PlayerImgSize: number;
-        };
-      };
-  
-      const ocrPayload = payload as OCRPayload;
+      const ocrPayload = payload as any;
   
       if (ocrPayload.ui_position) {
         setUiposition((prev) => ({
           ...prev,
-          ...ocrPayload.ui_position!,
+          ...ocrPayload.ui_position,
         }));
       }
   
       const ocrTokens: string[] = [
-        ...(ocrPayload.parsed?.players
-          ?.map((p) => p.name)
-          .filter((v): v is string => Boolean(v)) ?? []),
+        ...(ocrPayload.parsed?.players?.map((p: any) => p.name) ?? []),
         ...(ocrPayload.raw_text ?? []),
       ];
-  
-      const normalizeOCR = (text: string): string =>
-        text
-          .toLowerCase()
-          .replace(/@/g, "q")
-          .replace(/d/g, "q")
-          .replace(/0/g, "o")
-          .replace(/[1il]/g, "l")
-          .replace(/7/g, "l")
-          .replace(/5/g, "s")
-          .replace(/(.)\1{2,}/g, "$1")
-          .replace(/[^a-z0-9]/g, "")
-          .trim();
   
       const cleanTokens = ocrTokens
         .map(normalizeOCR)
@@ -161,11 +172,13 @@ export default function OverlayPage() {
   
       for (const token of cleanTokens) {
         for (const team of dbTeams) {
+          if (!team.teamImage) continue;
+  
           for (const player of team.players) {
-            if (!player.playerImage || !team.teamImage) continue;
+            if (!player.playerImage) continue;
   
             const playerKey = normalizeOCR(player.playerName);
-            if (!hasAnchor(token, playerKey)) continue;
+            if (!hasFuzzyAnchor(token, playerKey)) continue;
   
             const score = similarity(token, playerKey);
             if (score > bestScore) {
@@ -177,11 +190,7 @@ export default function OverlayPage() {
         }
       }
   
-      if (
-        bestTeam &&
-        bestPlayer &&
-        bestScore >= 0.75
-      ) {
+      if (bestTeam && bestPlayer && bestScore >= 0.75) {
         const match: MatchDebug = {
           playerName: bestPlayer.playerName,
           teamName: bestTeam.teamName,
@@ -191,27 +200,32 @@ export default function OverlayPage() {
           score: bestScore,
         };
   
-        lastStableMatch = match;
-        missCount = 0;  
+        lastStableMatchRef.current = match;
+        missCountRef.current = 0;
         setMatchDebug(match);
         return;
       }
-
   
-      missCount++;
+      missCountRef.current++;
   
-      if (lastStableMatch && missCount < MISS_THRESHOLD) {
-        setMatchDebug(lastStableMatch);
+      if (
+        lastStableMatchRef.current &&
+        missCountRef.current < MISS_THRESHOLD
+      ) {
+        setMatchDebug(lastStableMatchRef.current);
         return;
       }
   
-      lastStableMatch = null;
+      lastStableMatchRef.current = null;
+      missCountRef.current = 0;
       setMatchDebug(null);
     };
   
     source.onerror = () => source.close();
     return () => source.close();
   }, [dbTeams, isClient]);
+  
+
   
 
 
