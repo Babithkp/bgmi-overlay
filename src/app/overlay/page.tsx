@@ -78,152 +78,216 @@ export default function OverlayPage() {
 
 
 
-  const missCountRef = useRef(0);
-  const lastStableMatchRef = useRef<MatchDebug | null>(null);
-  const MISS_THRESHOLD = 5;
-  
-  const CHAR_EQUIV: Record<string, string[]> = {
-    "8": ["b"],
-    "b": ["8"],
-    "0": ["o"],
-    "o": ["0"],
-    "1": ["l"],
-    "l": ["1"],
-  };
-  
-  useEffect(() => {
-    if (!isClient) return;
-    if (dbTeams.length === 0) return;
-  
-    const source = new EventSource("/api/ocr-stream");
-  
-    function hasFuzzyAnchor(a: string, b: string): boolean {
-      if (a.length < 4 || b.length < 4) return false;
-  
-      for (let i = 0; i <= a.length - 4; i++) {
-        const sub = a.slice(i, i + 4);
-  
-        for (let j = 0; j <= b.length - 4; j++) {
-          const target = b.slice(j, j + 4);
-  
-          let ok = true;
-          for (let k = 0; k < 4; k++) {
-            const ca = sub[k];
-            const cb = target[k];
-  
-            if (ca === cb) continue;
-            if (
-              CHAR_EQUIV[ca]?.includes(cb) ||
-              CHAR_EQUIV[cb]?.includes(ca)
-            ) continue;
-  
-            ok = false;
-            break;
-          }
-  
-          if (ok) return true;
-        }
+// ===============================
+// REFS (PERSISTENT STATE)
+// ===============================
+const missCountRef = useRef(0);
+const lastStableMatchRef = useRef<MatchDebug | null>(null);
+const playerCacheRef = useRef<
+  {
+    player: Player;
+    team: Team;
+    key: string;
+    anchors: string[];
+  }[]
+>([]);
+
+const MISS_THRESHOLD = 5;
+
+// ===============================
+// NORMALIZATION (UNCHANGED)
+// ===============================
+const normalizeOCR = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/@/g, "q")
+    .replace(/d/g, "q")
+    .replace(/0/g, "o")
+    .replace(/[1il]/g, "l")
+    .replace(/7/g, "l")
+    .replace(/5/g, "s")
+    .replace(/(.)\1{2,}/g, "$1")
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+
+// ===============================
+// BUILD PLAYER CACHE (ONCE)
+// ===============================
+useEffect(() => {
+  if (dbTeams.length === 0) return;
+
+  const cache: {
+    player: Player;
+    team: Team;
+    key: string;
+    anchors: string[];
+  }[] = [];
+
+  for (const team of dbTeams) {
+    if (!team.teamImage) continue;
+
+    for (const player of team.players) {
+      if (!player.playerImage) continue;
+
+      const key = normalizeOCR(player.playerName);
+      if (key.length < 4) continue;
+
+      const anchors: string[] = [];
+      for (let i = 0; i <= key.length - 4; i++) {
+        anchors.push(key.slice(i, i + 4));
       }
-      return false;
+
+      cache.push({ player, team, key, anchors });
     }
-  
-    const normalizeOCR = (text: string): string =>
-      text
-        .toLowerCase()
-        .replace(/@/g, "q")
-        .replace(/d/g, "q")
-        .replace(/0/g, "o")
-        .replace(/[1il]/g, "l")
-        .replace(/7/g, "l")
-        .replace(/5/g, "s")
-        .replace(/(.)\1{2,}/g, "$1")
-        .replace(/[^a-z0-9]/g, "")
-        .trim();
-  
-    source.onmessage = (event) => {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(event.data);
-      } catch {
-        return;
+  }
+
+  playerCacheRef.current = cache;
+}, [dbTeams]);
+
+// ===============================
+// FAST FUZZY ANCHOR MATCH
+// ===============================
+function hasFastFuzzyAnchor(
+  token: string,
+  anchors: string[]
+): boolean {
+  for (let i = 0; i <= token.length - 4; i++) {
+    const sub = token.slice(i, i + 4);
+
+    for (const anchor of anchors) {
+      let ok = true;
+
+      for (let k = 0; k < 4; k++) {
+        const a = sub[k];
+        const b = anchor[k];
+
+        if (a === b) continue;
+
+        // OCR equivalence (runtime only, no mutation)
+        if (
+          (a === "8" && b === "b") ||
+          (a === "b" && b === "8") ||
+          (a === "0" && b === "o") ||
+          (a === "o" && b === "0") ||
+          (a === "1" && b === "l") ||
+          (a === "l" && b === "1")
+        ) {
+          continue;
+        }
+
+        ok = false;
+        break;
       }
-  
-      const ocrPayload = payload as any;
-  
-      if (ocrPayload.ui_position) {
-        setUiposition((prev) => ({
-          ...prev,
-          ...ocrPayload.ui_position,
-        }));
-      }
-  
-      const ocrTokens: string[] = [
-        ...(ocrPayload.parsed?.players?.map((p: any) => p.name) ?? []),
-        ...(ocrPayload.raw_text ?? []),
-      ];
-  
-      const cleanTokens = ocrTokens
-        .map(normalizeOCR)
-        .filter((t) => t.length >= 3 && t.length <= 25);
-  
-      let bestScore = 0;
-      let bestTeam: Team | null = null;
-      let bestPlayer: Player | null = null;
-  
-      for (const token of cleanTokens) {
-        for (const team of dbTeams) {
-          if (!team.teamImage) continue;
-  
-          for (const player of team.players) {
-            if (!player.playerImage) continue;
-  
-            const playerKey = normalizeOCR(player.playerName);
-            if (!hasFuzzyAnchor(token, playerKey)) continue;
-  
-            const score = similarity(token, playerKey);
-            if (score > bestScore) {
-              bestScore = score;
-              bestTeam = team;
-              bestPlayer = player;
-            }
-          }
+
+      if (ok) return true; // 🔥 EARLY EXIT
+    }
+  }
+  return false;
+}
+
+// ===============================
+// MAIN OCR STREAM EFFECT
+// ===============================
+useEffect(() => {
+  if (!isClient) return;
+  if (dbTeams.length === 0) return;
+
+  const source = new EventSource("/api/ocr-stream");
+
+  source.onmessage = (event) => {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+
+    const ocrPayload = payload as any;
+
+    // UI position updates
+    if (ocrPayload.ui_position) {
+      setUiposition((prev) => ({
+        ...prev,
+        ...ocrPayload.ui_position,
+      }));
+    }
+
+    // OCR tokens
+    const ocrTokens: string[] = [
+      ...(ocrPayload.parsed?.players
+        ?.map((p: any) => p.name)
+        .filter(Boolean) ?? []),
+      ...(ocrPayload.raw_text ?? []),
+    ];
+
+    const cleanTokens = ocrTokens
+      .map(normalizeOCR)
+      .filter((t) => t.length >= 3 && t.length <= 25);
+
+    let bestScore = 0;
+    let bestTeam: Team | null = null;
+    let bestPlayer: Player | null = null;
+
+    // ===============================
+    // FAST MATCH LOOP (CACHED)
+    // ===============================
+    for (const token of cleanTokens) {
+      for (const entry of playerCacheRef.current) {
+        if (!hasFastFuzzyAnchor(token, entry.anchors)) continue;
+
+        const score = similarity(token, entry.key);
+        if (score > bestScore) {
+          bestScore = score;
+          bestTeam = entry.team;
+          bestPlayer = entry.player;
         }
       }
-  
-      if (bestTeam && bestPlayer && bestScore >= 0.75) {
-        const match: MatchDebug = {
-          playerName: bestPlayer.playerName,
-          teamName: bestTeam.teamName,
-          teamImage: bestTeam.teamImage!,
-          playerImage: bestPlayer.playerImage!,
-          color: bestTeam.teamColor,
-          score: bestScore,
-        };
-  
-        lastStableMatchRef.current = match;
-        missCountRef.current = 0;
-        setMatchDebug(match);
-        return;
-      }
-  
-      missCountRef.current++;
-  
-      if (
-        lastStableMatchRef.current &&
-        missCountRef.current < MISS_THRESHOLD
-      ) {
-        setMatchDebug(lastStableMatchRef.current);
-        return;
-      }
-  
-      lastStableMatchRef.current = null;
+    }
+
+    // ===============================
+    // MATCH FOUND
+    // ===============================
+    if (bestTeam && bestPlayer && bestScore >= 0.75) {
+      const match: MatchDebug = {
+        playerName: bestPlayer.playerName,
+        teamName: bestTeam.teamName,
+        teamImage: bestTeam.teamImage!,
+        playerImage: bestPlayer.playerImage!,
+        color: bestTeam.teamColor,
+        score: bestScore,
+      };
+
+      lastStableMatchRef.current = match;
       missCountRef.current = 0;
-      setMatchDebug(null);
-    };
-  
-    source.onerror = () => source.close();
-    return () => source.close();
-  }, [dbTeams, isClient]);
+      setMatchDebug(match);
+      return;
+    }
+
+    // ===============================
+    // NO MATCH → TEMPORAL HOLD
+    // ===============================
+    missCountRef.current++;
+
+    if (
+      lastStableMatchRef.current &&
+      missCountRef.current < MISS_THRESHOLD
+    ) {
+      setMatchDebug(lastStableMatchRef.current);
+      return;
+    }
+
+    // ===============================
+    // HARD RESET
+    // ===============================
+    lastStableMatchRef.current = null;
+    missCountRef.current = 0;
+    setMatchDebug(null);
+  };
+
+  source.onerror = () => source.close();
+  return () => source.close();
+}, [dbTeams, isClient]);
+
   
 
   
