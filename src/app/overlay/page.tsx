@@ -4,30 +4,57 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
 
-interface Player {
-  id: string;
+type Player = {
   playerName: string;
-  playerImage: string | null;
-  position: number;
-}
+  playerImage?: string;
+};
 
-interface Team {
-  id: string;
+type Team = {
   teamName: string;
-  slotNumber: number;
-  teamImage: string | null;
+  teamImage?: string;
+  teamColor: string;
   players: Player[];
-  teamColor: string | null;
-}
+};
 
-interface MatchDebug {
+type MatchDebug = {
   playerName: string;
   teamName: string;
   teamImage: string;
   playerImage: string;
-  color: string | null;
+  color: string;
   score: number;
-}
+};
+
+type OCRPlayer = {
+  name?: string;
+};
+
+type OCRPayload = {
+  parsed?: {
+    players?: OCRPlayer[];
+    team?: string;
+  };
+  raw_text?: string[];
+  ui_position?: {
+    TeamShortLogoTop: number;
+    TeamShortLogoLeft: number;
+    TeamShortLogoWidth: number;
+    TeamShortLogoHeight: number;
+    TeamLogoTop: number;
+    TeamLogoLeft: number;
+    TeamLogoSize: number;
+    PlayerImgTop: number;
+    PlayerImgLeft: number;
+    PlayerImgSize: number;
+  };
+};
+
+type PlayerCacheEntry = {
+  player: Player;
+  team: Team;
+  key: string;
+  anchors: string[];
+};
 
 
 function similarity(a: string, b: string): number {
@@ -64,6 +91,7 @@ export default function OverlayPage() {
   const [matchDebug, setMatchDebug] = useState<MatchDebug | null>(null);
   const [uiposion, setUiposition] = useState(defaultUI);
   const isClient = typeof window !== "undefined";
+  const lastMessageTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isClient) return;
@@ -76,23 +104,10 @@ export default function OverlayPage() {
       .catch(() => console.error("Failed to load admin teams"));
   }, [isClient]);
 
-
-
-// ===============================
-// REFS (PERSISTENT STATE)
-// ===============================
-const missCountRef = useRef(0);
-const lastStableMatchRef = useRef<MatchDebug | null>(null);
-const playerCacheRef = useRef<
-  {
-    player: Player;
-    team: Team;
-    key: string;
-    anchors: string[];
-  }[]
->([]);
-
-const MISS_THRESHOLD = 5;
+  const missCountRef = useRef<number>(0);
+  const lastStableMatchRef = useRef<MatchDebug | null>(null);
+  const playerCacheRef = useRef<PlayerCacheEntry[]>([]);
+  const MISS_THRESHOLD = 5;
 
 // ===============================
 // NORMALIZATION (UNCHANGED)
@@ -116,12 +131,7 @@ const normalizeOCR = (text: string): string =>
 useEffect(() => {
   if (dbTeams.length === 0) return;
 
-  const cache: {
-    player: Player;
-    team: Team;
-    key: string;
-    anchors: string[];
-  }[] = [];
+  const cache: PlayerCacheEntry[] = [];
 
   for (const team of dbTeams) {
     if (!team.teamImage) continue;
@@ -137,7 +147,12 @@ useEffect(() => {
         anchors.push(key.slice(i, i + 4));
       }
 
-      cache.push({ player, team, key, anchors });
+      cache.push({
+        player,
+        team,
+        key,
+        anchors,
+      });
     }
   }
 
@@ -163,7 +178,6 @@ function hasFastFuzzyAnchor(
 
         if (a === b) continue;
 
-        // OCR equivalence (runtime only, no mutation)
         if (
           (a === "8" && b === "b") ||
           (a === "b" && b === "8") ||
@@ -179,11 +193,14 @@ function hasFastFuzzyAnchor(
         break;
       }
 
-      if (ok) return true; // 🔥 EARLY EXIT
+      if (ok) return true;
     }
   }
   return false;
 }
+const WATCHDOG_INTERVAL = 3000; // check every 3s
+const STALE_THRESHOLD = 7000;  // no OCR for 7s = reconnect
+
 
 // ===============================
 // MAIN OCR STREAM EFFECT
@@ -194,30 +211,36 @@ useEffect(() => {
 
   const source = new EventSource("/api/ocr-stream");
 
-  source.onmessage = (event) => {
-    let payload: unknown;
+  const watchdog = setInterval(() => {
+    const now = Date.now();
+    if (now - lastMessageTimeRef.current > STALE_THRESHOLD) {
+      console.warn("OCR stream stale — reconnecting");
+      source.close();
+    }
+  }, WATCHDOG_INTERVAL);
+
+  source.onmessage = (event: MessageEvent<string>) => {
+    lastMessageTimeRef.current = Date.now();
+
+    let payload: OCRPayload;
     try {
-      payload = JSON.parse(event.data);
+      payload = JSON.parse(event.data) as OCRPayload;
     } catch {
       return;
     }
 
-    const ocrPayload = payload as any;
-
-    // UI position updates
-    if (ocrPayload.ui_position) {
+    if (payload.ui_position) {
       setUiposition((prev) => ({
         ...prev,
-        ...ocrPayload.ui_position,
+        ...payload.ui_position!,
       }));
     }
 
-    // OCR tokens
     const ocrTokens: string[] = [
-      ...(ocrPayload.parsed?.players
-        ?.map((p: any) => p.name)
-        .filter(Boolean) ?? []),
-      ...(ocrPayload.raw_text ?? []),
+      ...(payload.parsed?.players
+        ?.map((p) => p.name)
+        .filter((v): v is string => Boolean(v)) ?? []),
+      ...(payload.raw_text ?? []),
     ];
 
     const cleanTokens = ocrTokens
@@ -228,9 +251,6 @@ useEffect(() => {
     let bestTeam: Team | null = null;
     let bestPlayer: Player | null = null;
 
-    // ===============================
-    // FAST MATCH LOOP (CACHED)
-    // ===============================
     for (const token of cleanTokens) {
       for (const entry of playerCacheRef.current) {
         if (!hasFastFuzzyAnchor(token, entry.anchors)) continue;
@@ -244,9 +264,7 @@ useEffect(() => {
       }
     }
 
-    // ===============================
-    // MATCH FOUND
-    // ===============================
+    /* MATCH FOUND */
     if (bestTeam && bestPlayer && bestScore >= 0.75) {
       const match: MatchDebug = {
         playerName: bestPlayer.playerName,
@@ -263,9 +281,7 @@ useEffect(() => {
       return;
     }
 
-    // ===============================
-    // NO MATCH → TEMPORAL HOLD
-    // ===============================
+    /* TEMPORAL HOLD */
     missCountRef.current++;
 
     if (
@@ -276,22 +292,19 @@ useEffect(() => {
       return;
     }
 
-    // ===============================
-    // HARD RESET
-    // ===============================
+    /* RESET */
     lastStableMatchRef.current = null;
     missCountRef.current = 0;
     setMatchDebug(null);
   };
 
   source.onerror = () => source.close();
-  return () => source.close();
+
+  return () => {
+    clearInterval(watchdog);
+    source.close();
+  };
 }, [dbTeams, isClient]);
-
-  
-
-  
-
 
   // if (!isClient) {
   //   return <div style={{ width: "1920px", height: "1080px" }} />;
