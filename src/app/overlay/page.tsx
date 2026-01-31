@@ -91,7 +91,6 @@ export default function OverlayPage() {
   const [matchDebug, setMatchDebug] = useState<MatchDebug | null>(null);
   const [uiposion, setUiposition] = useState(defaultUI);
   const isClient = typeof window !== "undefined";
-  const lastMessageTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isClient) return;
@@ -198,10 +197,6 @@ function hasFastFuzzyAnchor(
   }
   return false;
 }
-const WATCHDOG_INTERVAL = 3000; // check every 3s
-const STALE_THRESHOLD = 7000;  // no OCR for 7s = reconnect
-
-
 // ===============================
 // MAIN OCR STREAM EFFECT
 // ===============================
@@ -211,17 +206,7 @@ useEffect(() => {
 
   const source = new EventSource("/api/ocr-stream");
 
-  const watchdog = setInterval(() => {
-    const now = Date.now();
-    if (now - lastMessageTimeRef.current > STALE_THRESHOLD) {
-      console.warn("OCR stream stale — reconnecting");
-      source.close();
-    }
-  }, WATCHDOG_INTERVAL);
-
   source.onmessage = (event: MessageEvent<string>) => {
-    lastMessageTimeRef.current = Date.now();
-
     let payload: OCRPayload;
     try {
       payload = JSON.parse(event.data) as OCRPayload;
@@ -229,6 +214,7 @@ useEffect(() => {
       return;
     }
 
+    // UI position updates
     if (payload.ui_position) {
       setUiposition((prev) => ({
         ...prev,
@@ -236,6 +222,7 @@ useEffect(() => {
       }));
     }
 
+    // OCR tokens
     const ocrTokens: string[] = [
       ...(payload.parsed?.players
         ?.map((p) => p.name)
@@ -264,7 +251,7 @@ useEffect(() => {
       }
     }
 
-    /* MATCH FOUND */
+    // MATCH FOUND
     if (bestTeam && bestPlayer && bestScore >= 0.75) {
       const match: MatchDebug = {
         playerName: bestPlayer.playerName,
@@ -281,7 +268,7 @@ useEffect(() => {
       return;
     }
 
-    /* TEMPORAL HOLD */
+    // TEMPORAL HOLD
     missCountRef.current++;
 
     if (
@@ -292,19 +279,20 @@ useEffect(() => {
       return;
     }
 
-    /* RESET */
+    // HARD RESET
     lastStableMatchRef.current = null;
     missCountRef.current = 0;
     setMatchDebug(null);
   };
 
   source.onerror = () => source.close();
-
-  return () => {
-    clearInterval(watchdog);
-    source.close();
-  };
+  return () => source.close();
 }, [dbTeams, isClient]);
+
+  
+
+  
+
 
   // if (!isClient) {
   //   return <div style={{ width: "1920px", height: "1080px" }} />;
