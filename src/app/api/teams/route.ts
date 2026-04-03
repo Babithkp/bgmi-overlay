@@ -8,12 +8,12 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     const playerDefaults = [
-      "https://storage.trikonatech.com/dashboard/players/player1.jpeg",
-      "https://storage.trikonatech.com/dashboard/players/player2.jpeg",
-      "https://storage.trikonatech.com/dashboard/players/player3.jpeg",
-      "https://storage.trikonatech.com/dashboard/players/player4.jpeg",
-      "https://storage.trikonatech.com/dashboard/players/player5.jpeg",
-      "https://storage.trikonatech.com/dashboard/players/player6.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player1.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player2.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player3.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player4.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player5.jpeg",
+      "https://pub-a3c11c766fa643ebb0c20bfb1244c344.r2.dev/education-fiverr-bucket/Studienstipendium/player6.jpeg",
     ]
 
     const formData = await req.formData();
